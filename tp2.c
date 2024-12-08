@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
 #include <semaphore.h>
@@ -87,7 +88,7 @@ void controller(int semid, struct tampon *buffer,int msgid) {
 struct Message message;
 int mission_status;
     message.mtype = 1; // Message type (can be used for prioritization)
-//-----------------------------initialisation
+//--------------------------------initialisation
     int etatp[M];   
     struct info_camions {
         int etatc;
@@ -102,26 +103,33 @@ int mission_status;
     }
     int cpt_camion = N;
  do {
-    //changer etatp
+    //-----------------------------changer etatp
     
     for (int i = 0; i < M; i++) {
+        srand(time(NULL));
         etatp[i] = (rand() % 2) + 1;
     }
     //-----------------------------programmer mission
         for (int i = 0; i < N; i++) {
+        
+        /*srand(time(NULL));
+        int i = rand() % 5;//choose one camion between 0 and 4*/
             if (tab[i].etatc == 4) {
-                tab[i].carburant_actuel -= tab[i].consomation_recente;
+                
+                printf("[controleur] carburant actuel=%d de camion %d\n",tab[i].carburant_actuel,i);
 
                 if (tab[i].carburant_actuel <= MIN) {
                      // Send a message to camion
         		message.fa.camion_id = i;     
-        		message.fa.mission = 3;  //refuel      
+        		message.fa.mission = 3;  //refuel   
+        		tab[i].etatc = 3;   
                     break;
                 }
 
                 if (tab[i].carburant_actuel <= CP / 3) {
                 	message.fa.camion_id = i;     
         		message.fa.mission = 2;//rest
+        		tab[i].etatc = 2;//changed these so next time we dont send a mission to the same camion as before
                     break;
                 }
 
@@ -135,6 +143,7 @@ int mission_status;
                                 etatp[k] = 3;
                                 message.fa.camion_id = i; 
                                 message.fa.mission = 1;//collect 
+                                tab[i].etatc = 1;
                             	 message.fa.idP1 = j;
                                 message.fa.idP2= k;
                                 break;
@@ -142,13 +151,15 @@ int mission_status;
                         }
                         break;
                     }
+                    break;
                 }
+                break;
             }
         }
-      //-----------------------------send  mission msg
+      //-----------------------------send mission (msg)
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
-      printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
+      //printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
       
       //-----------------------------prelever from le tampon
  
@@ -162,12 +173,15 @@ int mission_status;
 
             printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
                    camion_id, mission_status, consomation_recente);
-
+            tab[camion_id].consomation_recente=  consomation_recente;    
+            tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
+            if (mission_status !=5) tab[camion_id].etatc=4;
+            else tab[camion_id].etatc=5;
+            
             // Decrement item count (cpt) 
             buffer->cpt--; printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
 
-            // Signal that there is now space in the buffer
-            printf("[Controleur] Releasing NV semaphore to signal empty tampon\n");
+          
             V(semid, 0); // NV semaphore (empty slot)
         } else {
             printf("[Controleur] No fin de mission from tampon.\n");
@@ -177,7 +191,7 @@ int mission_status;
     
       
       if (mission_status == 5) cpt_camion--; // fin de mission
-      sleep(5);
+      sleep(2);
     } while (cpt_camion != 0);
     
     exit(0);
@@ -211,6 +225,7 @@ struct Message message;
                 
                 mission_count--;
                 if ( mission_count == 5 ) {temp.mission_status = 5;}
+                printf("[Camion %d] mission count=%d\n",i,mission_count);
    
                 break;
 
@@ -249,7 +264,7 @@ struct Message message;
        
     }
     } while (mission_count != 0);
-    
+    printf("[camion %d] IS DONE!\n",i);
     exit(0);
 }
 
