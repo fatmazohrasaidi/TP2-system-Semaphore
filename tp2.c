@@ -20,7 +20,7 @@
 #define R 3       // Taille de Tfmissions
 #define CP 300    // Capacité de carburant
 #define MIN 70    // Seuil minimal de carburant
-#define C 2       // Consommation par unité de distance
+#define C 4       // Consommation par unité de distance
 #define MAX 12    // Nombre maximal de missions
 #define MAX_DISTANCE 10 // Distance max entre les points
 
@@ -106,56 +106,48 @@ int mission_status;
     //-----------------------------changer etatp
     
     for (int i = 0; i < M; i++) {
-        srand(time(NULL));
         etatp[i] = (rand() % 2) + 1;
     }
     //-----------------------------programmer mission
-        for (int i = 0; i < N; i++) {
-        
-        /*srand(time(NULL));
-        int i = rand() % 5;//choose one camion between 0 and 4*/
-            if (tab[i].etatc == 4) {
-                
-                printf("[controleur] carburant actuel=%d de camion %d\n",tab[i].carburant_actuel,i);
+        int last_camion = -1; // Track the last camion assigned a mission
 
-                if (tab[i].carburant_actuel <= MIN) {
-                     // Send a message to camion
-        		message.fa.camion_id = i;     
-        		message.fa.mission = 3;  //refuel   
-        		tab[i].etatc = 3;   
-                    break;
-                }
+for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
+    if (tab[i].etatc == 4) {
+        printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
 
-                if (tab[i].carburant_actuel <= CP / 3) {
-                	message.fa.camion_id = i;     
-        		message.fa.mission = 2;//rest
-        		tab[i].etatc = 2;//changed these so next time we dont send a mission to the same camion as before
-                    break;
-                }
-
-                for (int j = 0; j < M; j++) {
-                    if (etatp[j] == 1) {
-                        message.fa.idP1 = j;
-                        etatp[j] = 3;
-
-                        for (int k = j + 1; k < M; k++) {
-                            if (etatp[k] == 1) {
-                                etatp[k] = 3;
-                                message.fa.camion_id = i; 
-                                message.fa.mission = 1;//collect 
-                                tab[i].etatc = 1;
-                            	 message.fa.idP1 = j;
-                                message.fa.idP2= k;
-                                break;
-                            }
+        if (tab[i].carburant_actuel <= MIN) {
+            message.fa.camion_id = i;
+            message.fa.mission = 3; // refuel
+            tab[i].etatc = 3;
+        } else if (tab[i].carburant_actuel <= CP / 3) {
+            message.fa.camion_id = i;
+            message.fa.mission = 2; // rest
+            tab[i].etatc = 2;
+        } else {
+            for (int j = 0; j < M; j++) {
+                if (etatp[j] == 1) {
+                    etatp[j] = 3;
+                    for (int k = j + 1; k < M; k++) {
+                        if (etatp[k] == 1) {
+                            etatp[k] = 3;
+                            message.fa.camion_id = i;
+                            message.fa.mission = 1; // collect
+                            tab[i].etatc = 1;
+                            message.fa.idP1 = j;
+                            message.fa.idP2 = k;
+                            break;
                         }
-                        break;
                     }
                     break;
                 }
-                break;
             }
         }
+
+        last_camion = i; // Update the last camion assigned
+        break;           // Exit after assigning one mission
+    }
+}
+
       //-----------------------------send mission (msg)
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
@@ -173,13 +165,20 @@ int mission_status;
 
             printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
                    camion_id, mission_status, consomation_recente);
-            tab[camion_id].consomation_recente=  consomation_recente;    
-            tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
+            
+            if (mission_status==3) {
+            		tab[camion_id].carburant_actuel=CP;
+            }
+            else {
+            		tab[camion_id].consomation_recente=  consomation_recente;    
+            		tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
+            }
+            
             if (mission_status !=5) tab[camion_id].etatc=4;
             else tab[camion_id].etatc=5;
             
             // Decrement item count (cpt) 
-            buffer->cpt--; printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
+            buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
 
           
             V(semid, 0); // NV semaphore (empty slot)
@@ -209,7 +208,7 @@ struct Message message;
     do {
     //----------------------recevoir misssion
     msgrcv(msgid, &message, sizeof(struct Faffect), 1, 0);
-    
+    //printf("[camion %d] received a message.\n",i);
     // Check if the message is for the correct camion_id
       if (message.fa.camion_id ==i)
       {
@@ -232,7 +231,7 @@ struct Message message;
             case 2:
                 sleep(3);
                 temp.mission_status = 2;
-      
+                temp.consomation_recente =0;
                 break;
 
             case 3:
@@ -258,11 +257,16 @@ struct Message message;
         // Update item count (cpt)
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
         buffer->cpt++;
-        printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
+        //printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
         V(semid, 2); // Release MUTEXCPT
 
        
     }
+    else {
+         // Message is not for this truck; requeue it
+         //printf("[camion %d] Message not for this truck, requeuing.\n", i);
+         msgsnd(msgid, &message, sizeof(struct Faffect), 0);
+	}
     } while (mission_count != 0);
     printf("[camion %d] IS DONE!\n",i);
     exit(0);
