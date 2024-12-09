@@ -15,7 +15,7 @@ int init_message_queue() {
     int msgid;
 
     // Create the message queue
-    msgid = msgget(MSG_KEY, IPC_CREAT | 0666); // Permissions: read/write for everyone
+    msgid = msgget(ftok("message.h", MSG_KEY), IPC_CREAT | 0666); // Permissions: read/write for everyone
     if (msgid == -1) {
         perror("Error initializing message queue");
         exit(1);

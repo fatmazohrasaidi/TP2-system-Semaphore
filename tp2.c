@@ -85,6 +85,7 @@ void Prelever(struct tampon *buffer, int *camion_id, int *mission_status, int *c
 //le truc est qu'on veut pas qu'il bloque and so we use cpt :entier := 0; partage entre les processus et on le protege par des mutex
 // on utlise un mutexcpt memoire partage q (qui gere le mouvements de tampon)
 void controller(int semid, struct tampon *buffer,int msgid) {
+int last_camion = -1; // Track the last camion assigned a mission
 struct Message message;
 int mission_status;
     message.mtype = 1; // Message type (can be used for prioritization)
@@ -108,9 +109,46 @@ int mission_status;
     for (int i = 0; i < M; i++) {
         etatp[i] = (rand() % 2) + 1;
     }
-    //-----------------------------programmer mission
-        int last_camion = -1; // Track the last camion assigned a mission
+    
+    //-----------------------------prelever from le tampon
+ 
+    
+        P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
 
+        if (buffer->cpt > 0) {
+            // Critical section: read and remove from buffer
+            int camion_id, mission_status, consomation_recente;
+            V(semid, 2); // Release MUTEXCPT
+            Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
+	    P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
+            printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
+                   camion_id, mission_status, consomation_recente);
+            
+            if (mission_status==3) {
+            		tab[camion_id].carburant_actuel=CP;
+            }
+            else {
+            		tab[camion_id].consomation_recente=  consomation_recente;    
+            		tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
+            }
+            
+            if (mission_status !=5) tab[camion_id].etatc=4;
+            else tab[camion_id].etatc=5;
+            
+            // Decrement item count (cpt) 
+            buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
+
+          
+           V(semid, 2); // Release MUTEXCPT
+        } else {
+            V(semid, 2); // Release MUTEXCPT
+            printf("[Controleur] No fin de mission from tampon.\n");
+        }
+
+        
+    //-----------------------------programmer mission
+        
+	message.fa.mission=0;
 for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
     if (tab[i].etatc == 4) {
         printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
@@ -119,16 +157,16 @@ for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count
             message.fa.camion_id = i;
             message.fa.mission = 3; // refuel
             tab[i].etatc = 3;
-        } else if (tab[i].carburant_actuel <= CP / 3) {
+        } else if (tab[i].carburant_actuel <= CP / 3 && tab[i].consomation_recente !=0 ) {//si le camion a fait une mission et carburanr actuel<=CP alors repos
             message.fa.camion_id = i;
             message.fa.mission = 2; // rest
             tab[i].etatc = 2;
         } else {
             for (int j = 0; j < M; j++) {
-                if (etatp[j] == 1) {
+                if (etatp[j] == 2) {
                     etatp[j] = 3;
                     for (int k = j + 1; k < M; k++) {
-                        if (etatp[k] == 1) {
+                        if (etatp[k] == 2) {
                             etatp[k] = 3;
                             message.fa.camion_id = i;
                             message.fa.mission = 1; // collect
@@ -149,44 +187,12 @@ for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count
 }
 
       //-----------------------------send mission (msg)
+      if (message.fa.mission !=0){
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
       //printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
+      }else printf("\ncant send mission!\n");
       
-      //-----------------------------prelever from le tampon
- 
-    
-        P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-
-        if (buffer->cpt > 0) {
-            // Critical section: read and remove from buffer
-            int camion_id, mission_status, consomation_recente;
-            Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
-
-            printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
-                   camion_id, mission_status, consomation_recente);
-            
-            if (mission_status==3) {
-            		tab[camion_id].carburant_actuel=CP;
-            }
-            else {
-            		tab[camion_id].consomation_recente=  consomation_recente;    
-            		tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
-            }
-            
-            if (mission_status !=5) tab[camion_id].etatc=4;
-            else tab[camion_id].etatc=5;
-            
-            // Decrement item count (cpt) 
-            buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
-
-          
-            V(semid, 0); // NV semaphore (empty slot)
-        } else {
-            printf("[Controleur] No fin de mission from tampon.\n");
-        }
-
-        V(semid, 2); // Release MUTEXCPT
     
       
       if (mission_status == 5) cpt_camion--; // fin de mission
@@ -214,13 +220,10 @@ struct Message message;
       {
         switch (message.fa.mission) {
             case 1:
-                sleep(5);
+                sleep(2);
                 temp.mission_status = 1;
-                if (message.fa.idP2 < message.fa.idP1)
-                {temp.consomation_recente = C * (dist_decharge[message.fa.idP1] + dist_poubelles[message.fa.idP2][message.fa.idP1]);
-                printf("[Camion %d] dis dech=%d dist poub[%d][%d]=%d\n",i,dist_decharge[message.fa.idP1],message.fa.idP2,message.fa.idP1, dist_poubelles[message.fa.idP2][message.fa.idP1]  );}
-                else {temp.consomation_recente = C * (dist_decharge[message.fa.idP1] + dist_poubelles[message.fa.idP1][message.fa.idP2]);
-                printf("[Camion %d] dis dech=%d dist poub[%d][%d]=%d\n",i,dist_decharge[message.fa.idP1],message.fa.idP1,message.fa.idP2, dist_poubelles[message.fa.idP1][message.fa.idP2]  );}
+                temp.consomation_recente = C * (dist_decharge[message.fa.idP1] + dist_poubelles[message.fa.idP1][message.fa.idP2]);
+                printf("[Camion %d] dis dech=%d dist poub[%d][%d]=%d\n",i,dist_decharge[message.fa.idP1],message.fa.idP1,message.fa.idP2, dist_poubelles[message.fa.idP1][message.fa.idP2]  );
                 
                 mission_count--;
                 if ( mission_count == 5 ) {temp.mission_status = 5;}
