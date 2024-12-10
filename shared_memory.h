@@ -6,6 +6,17 @@
 #include <sys/shm.h>
 #include <sys/types.h>
 
+#define R 3       // Taille de Tfmissions
+// Shared memory structure
+struct tampon {
+    int q;    // Queue pointer (next empty in tampon)
+    int cpt;  // Counter for the number of items in the tampon
+    struct Tfmissions {
+        int camion_id;         // Truck identifier
+        int mission_status;    // Mission status (5 if finished)
+        int consomation_recente; // Recent consumption
+    } tabmission[R]; // Array of missions
+};
 /*************************************************************create shared memory********************************************************************/
 int cree_mem_partage(key_t key, size_t size) {
     int shmid = shmget(key, size, IPC_CREAT | 0666);
@@ -19,10 +30,14 @@ int cree_mem_partage(key_t key, size_t size) {
 /*************************************************************attach shared memory********************************************************************/
 struct tampon * attache_mem_partage(int shmid) {
     struct tampon  *mem = shmat(shmid, NULL, 0);
+    // Initialize shared memory buffer
     if (mem == (struct tampon *)-1) {
         perror("Echec de shmat");
         exit(1);
     }
+    // Initialize shared memory buffer fields
+    mem->q = 0;   // Start with the first slot
+    mem->cpt = 0; // No items initially
     return mem;
 }
 
