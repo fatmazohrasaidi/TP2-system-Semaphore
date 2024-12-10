@@ -115,11 +115,11 @@ int mission_status;
         if ( (buffer->cpt) != 0) {
             // Critical section: read and remove from buffer
             int camion_id, mission_status, consomation_recente;
-            
-            Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
-            V(semid, 0);//release nv?
+           
             
             V(semid, 2); // Release MUTEXCPT
+            Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
+            
             
             printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
                    camion_id, mission_status, consomation_recente);
@@ -144,6 +144,7 @@ int mission_status;
             // Decrement item count (cpt) 
             buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
            V(semid, 2); // Release MUTEXCPT
+           V(semid, 0);//release nv?
            
         } else {
             V(semid, 2); // Release MUTEXCPT
@@ -172,7 +173,7 @@ for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) 
         } else {
             for (int j = 0; j < M; j++) {
                 if (etatp[j] == 2) {
-                    etatp[j] = 3;
+                    etatp[j] = 3;//a la in apres trouve
                     for (int k = j + 1; k < M; k++) {
                         if (etatp[k] == 2) {
                             etatp[k] = 3;
@@ -249,16 +250,23 @@ struct Message message;
                 break;
         }
         temp.camion_id =i;
-        P(semid, 0); // NV semaphore, si il y a place dans le tampon
+        
+	
 
+	if ( (buffer->cpt) != R)
+	{
+		
+	P(semid, 0); // NV semaphore, si il y a place dans le tampon
         P(semid, 1); // MUTEXP semaphore (exclusive access to shared buffer)
-
-        // Critical section: write into buffer
-        Deposer(buffer, i,temp); // Add mission to buffer
+	// Critical section: write into buffer
+	Deposer(buffer, i,temp); // Add mission to buffer
         printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
-
         // Release MUTEXP
         V(semid, 1);
+        
+        
+        
+        
 
         // Update item count (cpt)
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
@@ -266,6 +274,13 @@ struct Message message;
         //printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
         V(semid, 2); // Release MUTEXCPT
         //printf("[camion %d] cpt=%d\n",i,buffer->cpt);
+	}
+	/*else 
+	{V(semid, 1); // Release MUTEXCPT
+	
+	}*/
+
+        
 
        
     }
@@ -281,7 +296,7 @@ struct Message message;
 }
 
 
-void lock_file(FILE *file) {
+/*void lock_file(FILE *file) {
     int fd = fileno(file);
     struct flock lock;
     lock.l_type = F_RDLCK; // Read lock
@@ -305,7 +320,7 @@ void unlock_file(FILE *file) {
         perror("Error unlocking file");
         exit(1);
     }
-}
+}*/
 
 /************************************************************REMPLIR**************************************************/
 void remplir_distance() {
@@ -349,16 +364,21 @@ void remplir_distance() {
 int main() {
    
      int shmid, semid;
-    key_t key = CLE;
+    key_t key = CLE;int msgid;
+    struct tampon *buffer;
+    /*delete_message_queue(msgid) ;
+        detache_mem_partage(buffer);
+        detruire_mem_partage(shmid) ;
+        sem_delete(semid);*/
     //--------------------------------------cree les structures
     // Create shared memory
     shmid = cree_mem_partage(key, sizeof(struct tampon)) ;
 
     // Attach shared memory
-    struct tampon *buffer = attache_mem_partage(shmid);
+    buffer = attache_mem_partage(shmid);
 
     // Create a message queue
-    int msgid =init_message_queue();
+    msgid =init_message_queue();
 
 
 
@@ -401,5 +421,11 @@ int main() {
             wait(NULL);  // Wait for each truck process to finish
         }
         exit(1);
+        
+        delete_message_queue(msgid) ;
+        detache_mem_partage(buffer);
+        detruire_mem_partage(shmid) ;
+        sem_delete(semid);
+        
     return 0;
 }
