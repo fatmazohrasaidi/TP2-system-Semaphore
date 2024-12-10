@@ -8,7 +8,7 @@
 #include <errno.h>
 
 // Define the message queue key
-#define MSG_KEY 1234
+#define MSG_KEY 123
 
 // Function to initialize the message queue
 int init_message_queue() {

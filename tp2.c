@@ -20,8 +20,8 @@
 #define R 3       // Taille de Tfmissions
 #define CP 300    // Capacité de carburant
 #define MIN 70    // Seuil minimal de carburant
-#define C 4       // Consommation par unité de distance
-#define MAX 12    // Nombre maximal de missions
+#define C 8       // Consommation par unité de distance
+#define MAX 5    // Nombre maximal de missions
 #define MAX_DISTANCE 10 // Distance max entre les points
 
 
@@ -81,9 +81,6 @@ void Prelever(struct tampon *buffer, int *camion_id, int *mission_status, int *c
 }
 /***********************************************************************/
 /**************************************************	CONTROLEUR	********************************************/
-//apres avoir deposer dans le tampon on doit verifier si il est plein ou non mais 
-//le truc est qu'on veut pas qu'il bloque and so we use cpt :entier := 0; partage entre les processus et on le protege par des mutex
-// on utlise un mutexcpt memoire partage q (qui gere le mouvements de tampon)
 void controller(int semid, struct tampon *buffer,int msgid) {
 int last_camion = -1; // Track the last camion assigned a mission
 struct Message message;
@@ -115,12 +112,15 @@ int mission_status;
     
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
 
-        if (buffer->cpt > 0) {
+        if ( (buffer->cpt) != 0) {
             // Critical section: read and remove from buffer
             int camion_id, mission_status, consomation_recente;
-            V(semid, 2); // Release MUTEXCPT
+            
             Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
-	    P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
+            V(semid, 0);//release nv?
+            
+            V(semid, 2); // Release MUTEXCPT
+            
             printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n",
                    camion_id, mission_status, consomation_recente);
             
@@ -133,23 +133,31 @@ int mission_status;
             }
             
             if (mission_status !=5) tab[camion_id].etatc=4;
-            else tab[camion_id].etatc=5;
+            else {tab[camion_id].etatc=5;
+            	cpt_camion--; 
+            	printf("\n******cpt_camion=%d*********\n",cpt_camion);// fin de mission
+            }
             
+            
+            
+	    P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
             // Decrement item count (cpt) 
             buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
-
-          
            V(semid, 2); // Release MUTEXCPT
+           
         } else {
             V(semid, 2); // Release MUTEXCPT
+            
             printf("[Controleur] No fin de mission from tampon.\n");
+            //printf("[controleur] cpt=%d",buffer->cpt);
         }
 
         
     //-----------------------------programmer mission
-        
+        int i,count;
+
 	message.fa.mission=0;
-for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
+for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
     if (tab[i].etatc == 4) {
         printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
 
@@ -168,7 +176,7 @@ for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count
                     for (int k = j + 1; k < M; k++) {
                         if (etatp[k] == 2) {
                             etatp[k] = 3;
-                            message.fa.camion_id = i;
+                            message.fa.camion_id =i;
                             message.fa.mission = 1; // collect
                             tab[i].etatc = 1;
                             message.fa.idP1 = j;
@@ -191,21 +199,19 @@ for (int i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
       //printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
-      }else printf("\ncant send mission!\n");
+      }//else printf("\ncant send mission!\n");
       
     
-      
-      if (mission_status == 5) cpt_camion--; // fin de mission
+
       sleep(2);
     } while (cpt_camion != 0);
-    
+    printf("\n[CONTREULEUR] DONE!!!\n");
     exit(0);
 }
 
 /***************************************************CAMION*********************************************/
 void camion(int i,int semid, struct tampon *buffer,int msgid) {
 struct Message message;
-    message.mtype = 1; // Message type (can be used for prioritization)
 
     int mission_count = MAX;
     struct Tfmissions temp;
@@ -217,16 +223,15 @@ struct Message message;
     //printf("[camion %d] received a message.\n",i);
     // Check if the message is for the correct camion_id
       if (message.fa.camion_id ==i)
-      {
+      {printf("{camion %d] received a mission!(mission=%d)\n",i,message.fa.mission);
         switch (message.fa.mission) {
             case 1:
                 sleep(2);
                 temp.mission_status = 1;
                 temp.consomation_recente = C * (dist_decharge[message.fa.idP1] + dist_poubelles[message.fa.idP1][message.fa.idP2]);
                 printf("[Camion %d] dis dech=%d dist poub[%d][%d]=%d\n",i,dist_decharge[message.fa.idP1],message.fa.idP1,message.fa.idP2, dist_poubelles[message.fa.idP1][message.fa.idP2]  );
-                
                 mission_count--;
-                if ( mission_count == 5 ) {temp.mission_status = 5;}
+                if ( mission_count == 0 ) {temp.mission_status = 5;}
                 printf("[Camion %d] mission count=%d\n",i,mission_count);
    
                 break;
@@ -244,8 +249,6 @@ struct Message message;
                 break;
         }
         temp.camion_id =i;
-        
-        
         P(semid, 0); // NV semaphore, si il y a place dans le tampon
 
         P(semid, 1); // MUTEXP semaphore (exclusive access to shared buffer)
@@ -262,12 +265,14 @@ struct Message message;
         buffer->cpt++;
         //printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
         V(semid, 2); // Release MUTEXCPT
+        //printf("[camion %d] cpt=%d\n",i,buffer->cpt);
 
        
     }
     else {
          // Message is not for this truck; requeue it
-         //printf("[camion %d] Message not for this truck, requeuing.\n", i);
+         /*printf("[camion %d] Message not for this truck, requeuing.\n", i);
+         sleep(2);*/
          msgsnd(msgid, &message, sizeof(struct Faffect), 0);
 	}
     } while (mission_count != 0);
@@ -321,7 +326,7 @@ void remplir_distance() {
         }
     }
     int i,j;
-    lock_file(file_poubelles); // Lock before reading
+    //lock_file(file_poubelles); // Lock before reading
     for (j = 0; j < M; j++) {
         for (i = 0; i < M; i++) {
             if (fscanf(file_poubelles, "%d", &dist_poubelles[j][i]) != 1) {
@@ -333,7 +338,7 @@ void remplir_distance() {
         }
     }
     
-    unlock_file(file_poubelles); // Unlock after reading
+    //unlock_file(file_poubelles); // Unlock after reading
    
 
     fclose(file_decharge);
