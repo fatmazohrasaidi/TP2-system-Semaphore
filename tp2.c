@@ -14,6 +14,7 @@
 // Define CLE and SEM_KEY
 #define CLE 1234       // Example value for the key
 #define SEM_KEY 5678   // Example value for the semaphore key
+#define MSG_KEY 123
 
 #define M 10      // Nombre de poubelles
 #define N 5       // Nombre de camions
@@ -197,6 +198,7 @@ for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) 
 
       //-----------------------------send mission (msg)
       if (message.fa.mission !=0){
+      message.mtype = message.fa.camion_id + 1; // Set type to camion_id + 1
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
       //printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
@@ -220,11 +222,8 @@ struct Message message;
     remplir_distance();
     do {
     //----------------------recevoir misssion
-    msgrcv(msgid, &message, sizeof(struct Faffect), 1, 0);
-    //printf("[camion %d] received a message.\n",i);
-    // Check if the message is for the correct camion_id
-      if (message.fa.camion_id ==i)
-      {printf("{camion %d] received a mission!(mission=%d)\n",i,message.fa.mission);
+    msgrcv(msgid, &message, sizeof(struct Faffect), i + 1, 0);
+      printf("{camion %d] received a mission!(mission=%d)\n",i,message.fa.mission);
         switch (message.fa.mission) {
             case 1:
                 sleep(2);
@@ -281,15 +280,9 @@ struct Message message;
 	}*/
 
         
-
+	sleep(2);
        
-    }
-    else {
-         // Message is not for this truck; requeue it
-         /*printf("[camion %d] Message not for this truck, requeuing.\n", i);
-         sleep(2);*/
-         msgsnd(msgid, &message, sizeof(struct Faffect), 0);
-	}
+   
     } while (mission_count != 0);
     printf("[camion %d] IS DONE!\n",i);
     exit(0);
@@ -366,8 +359,8 @@ int main() {
      int shmid, semid;
     key_t key = CLE;int msgid;
     struct tampon *buffer;
-    /*delete_message_queue(msgid) ;
-        detache_mem_partage(buffer);
+    delete_message_queue(MSG_KEY) ;
+        /*detache_mem_partage(buffer);
         detruire_mem_partage(shmid) ;
         sem_delete(semid);*/
     //--------------------------------------cree les structures
@@ -378,7 +371,7 @@ int main() {
     buffer = attache_mem_partage(shmid);
 
     // Create a message queue
-    msgid =init_message_queue();
+    msgid =init_message_queue(MSG_KEY);
 
 
 
@@ -422,7 +415,7 @@ int main() {
         }
         exit(1);
         
-        delete_message_queue(msgid) ;
+        delete_message_queue(MSG_KEY) ;
         detache_mem_partage(buffer);
         detruire_mem_partage(shmid) ;
         sem_delete(semid);
