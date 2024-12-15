@@ -11,7 +11,6 @@
 struct tampon {
     int q;    // Queue pointer (next empty in tampon)
     int cpt;  // Counter for the number of items in the tampon
-    int t; 
     struct Tfmissions {
         int camion_id;         // Truck identifier
         int mission_status;    // Mission status (5 if finished)
@@ -38,7 +37,6 @@ struct tampon * attache_mem_partage(int shmid) {
     }
     // Initialize shared memory buffer fields
     mem->q = 0; 
-    mem->t = 0;   // Start with the first slot
     mem->cpt = 0; // No items initially
     return mem;
 }

@@ -53,22 +53,19 @@ void Deposer(struct tampon *buffer, int camion_id, struct Tfmissions temp) {
    
 }
 /**************************************************	PRELEVER	********************************************/
-void Prelever(struct tampon *buffer, int *camion_id, int *mission_status, int *consomation_recente) {
-	int index = buffer->t % R;
-    //int index = (buffer->q - buffer->cpt + R) % R; // Calculate oldest entry
-    //si cpt= 3 all full, q=0 then, index= (0-3+3)%3=0, so we retreive the first mission put in le tampon which is 0 
-    //si cpt=2, T[1] T[2] full , q=0 T[0] empty...  then idex=(0-2+3)%3= 1 cuz T[1] was put first in le tampon
-    *camion_id = buffer->tabmission[index].camion_id;
-    *mission_status = buffer->tabmission[index].mission_status;
-    *consomation_recente = buffer->tabmission[index].consomation_recente;
+void Prelever(struct tampon *buffer, int *camion_id, int *mission_status, int *consomation_recente, int *t) {
 
-    buffer->t = (buffer->t + 1) % R;
+    *camion_id = buffer->tabmission[*t].camion_id;
+    *mission_status = buffer->tabmission[*t].mission_status;
+    *consomation_recente = buffer->tabmission[*t].consomation_recente;
+
+    *t= (*t + 1) % R;
 }
 /**************************************************	CONTROLEUR	********************************************/
 void controller(int semid, struct tampon *buffer,int msgid) {
 int last_camion = -1; // Track the last camion assigned a mission
 struct Message message;
-int mission_status;
+int mission_status,t=0;
     message.mtype = 1; // Message type (can be used for prioritization)
 //--------------------------------initialisation
     int etatp[M];   
@@ -97,18 +94,18 @@ int mission_status;
     
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
 
-        if ( (buffer->cpt) != 0) {
-        
-            V(semid, 2); // Release MUTEXCPT
-            Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
-                printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n", camion_id, mission_status, consomation_recente);
-                recoie=1;
-	    P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-            // Decrement item count (cpt)
-            buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
-            V(semid, 2); // Release MUTEXCPT
-            V(semid, 0);//release nv?        
-        } else {
+        if ( (buffer->cpt) != 0) 
+        {
+        		V(semid, 2); // MUTEXCPT
+            		Prelever(buffer, &camion_id, &mission_status, &consomation_recente,&t); // Take mission from buffer
+                	printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n", camion_id, mission_status, consomation_recente);
+                	recoie=1;
+	    		P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
+            		buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
+            		V(semid, 2); // Release MUTEXCPT
+            		V(semid, 0);//release nv?        
+        } else 
+        {
             V(semid, 2); // Release MUTEXCPT   
             //printf("[Controleur] No fin de mission from tampon.\n");
         }    
@@ -238,21 +235,14 @@ struct Message message;
         temp.camion_id =i;
         
 	//------------------------- camion va deposer
-	P(semid, 0); // NV semaphore, si il y a place dans le tampon
-	
+	P(semid, 0); // NV semaphore, si il y a place dans le tampon	
         P(semid, 1); // MUTEXP semaphore (exclusive access to shared buffer)
-	
 	Deposer(buffer, i,temp); // Add fin mission to buffer
-        printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
-        
-        	
-        
+        	printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
         V(semid, 1);// Release MUTEXP
-        // Update item count (cpt)
-        	P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-        	buffer->cpt++;
-        	//printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
-        	V(semid, 2); // Release MUTEXCPT
+        P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
+        buffer->cpt++;
+        V(semid, 2); // Release MUTEXCPT
        
 	sleep(2);
     } while (mission_count != 0);
@@ -309,7 +299,7 @@ for (int k=0; k<30;k++)
 void affiche_parent()
 {
 new_line();
-printf("\n\tPROCESSUS PARENT:\n");
+printf("\n\t\t\t\tPROCESSUS PARENT:\n");
 new_line();
 	printf("\n");
 }
@@ -317,7 +307,7 @@ new_line();
 void affiche_fils()
 {
 new_line();
-printf("\n\tPROCESSUS CONTROLEUR ET PROCESSUS CAMIONS:\n");
+printf("\n\t\t\t\tPROCESSUS CONTROLEUR ET PROCESSUS CAMIONS:\n");
 new_line();
 	printf("\n");
 }
