@@ -65,5 +65,6 @@ void V(int semid, int sem_num) {
 void sem_delete(int semid) {
     if (semctl(semid, 0, IPC_RMID, 0) == -1)
         perror("Erreur dans destruction semaphore");
-}
+        else printf("\tL esemble de semaphore detruit avec succes.\n");
+} 
 

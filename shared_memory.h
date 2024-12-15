@@ -11,6 +11,7 @@
 struct tampon {
     int q;    // Queue pointer (next empty in tampon)
     int cpt;  // Counter for the number of items in the tampon
+    int t; 
     struct Tfmissions {
         int camion_id;         // Truck identifier
         int mission_status;    // Mission status (5 if finished)
@@ -36,7 +37,8 @@ struct tampon * attache_mem_partage(int shmid) {
         exit(1);
     }
     // Initialize shared memory buffer fields
-    mem->q = 0;   // Start with the first slot
+    mem->q = 0; 
+    mem->t = 0;   // Start with the first slot
     mem->cpt = 0; // No items initially
     return mem;
 }
@@ -54,7 +56,7 @@ void detruire_mem_partage(int shmid) {
     if (shmctl(shmid, IPC_RMID, NULL) == -1) {
         perror("Echec lors de la destruction de la mémoire partagée");
         exit(1);
-    }
+    }else printf("\tla memoire partage detruit avec succes.\n");
 }
 
 #endif // SHARED_MEMORY_H

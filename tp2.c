@@ -24,15 +24,10 @@
 #define MAX 12  // Nombre maximal de missions
 #define MAX_DISTANCE 10 // Distance max entre les points
 
-
+/****************************		DECLARATION DES STRUCTURE	***************************************/
 int dist_poubelles[M][M];
 int dist_decharge[M];
-int nv = R;
-// Function declarations
 void remplir_distance();
-
-/****************************		DECLARATION DES STRUCTURE	***************************************/
-
 
 // Structure for Faffect message (Controller -> Truck)
 struct Faffect {
@@ -47,15 +42,9 @@ struct Message {
     struct Faffect fa;     // Payload (Faffect structure)
 };
 
-
-
-
-
-
-// deposer dans le tampon /*le camion va deposer when mission finished*/
+/**************************************************	DEPOSER	********************************************/
 void Deposer(struct tampon *buffer, int camion_id, struct Tfmissions temp) {
     int index = buffer->q % R; // Find next empty slot
-
     buffer->tabmission[index].camion_id = temp.camion_id;
     buffer->tabmission[index].mission_status = temp.mission_status; // Dummy value for mission status
     buffer->tabmission[index].consomation_recente = temp.consomation_recente ; // Dummy value for consumption
@@ -63,18 +52,18 @@ void Deposer(struct tampon *buffer, int camion_id, struct Tfmissions temp) {
     buffer->q = (buffer->q + 1) % R; // Update queue pointer
    
 }
-
-// prelever from le tampon /*le contreuleur va prelever*/
+/**************************************************	PRELEVER	********************************************/
 void Prelever(struct tampon *buffer, int *camion_id, int *mission_status, int *consomation_recente) {
-    int index = (buffer->q - buffer->cpt + R) % R; // Calculate oldest entry
-
+	int index = buffer->t % R;
+    //int index = (buffer->q - buffer->cpt + R) % R; // Calculate oldest entry
+    //si cpt= 3 all full, q=0 then, index= (0-3+3)%3=0, so we retreive the first mission put in le tampon which is 0 
+    //si cpt=2, T[1] T[2] full , q=0 T[0] empty...  then idex=(0-2+3)%3= 1 cuz T[1] was put first in le tampon
     *camion_id = buffer->tabmission[index].camion_id;
     *mission_status = buffer->tabmission[index].mission_status;
     *consomation_recente = buffer->tabmission[index].consomation_recente;
 
-    
+    buffer->t = (buffer->t + 1) % R;
 }
-/***********************************************************************/
 /**************************************************	CONTROLEUR	********************************************/
 void controller(int semid, struct tampon *buffer,int msgid) {
 int last_camion = -1; // Track the last camion assigned a mission
@@ -109,33 +98,26 @@ int mission_status;
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
 
         if ( (buffer->cpt) != 0) {
-            // Critical section: read and remove from buffer
-           
-            
+        
             V(semid, 2); // Release MUTEXCPT
             Prelever(buffer, &camion_id, &mission_status, &consomation_recente); // Take mission from buffer
                 printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n", camion_id, mission_status, consomation_recente);
-                recoie=1; 
-            
+                recoie=1;
 	    P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-            // Decrement item count (cpt) 
+            // Decrement item count (cpt)
             buffer->cpt--; //printf("[Controleur] decrement cpt=%d\n",buffer->cpt);
-           V(semid, 2); // Release MUTEXCPT
-           V(semid, 0);//release nv?
-           
+            V(semid, 2); // Release MUTEXCPT
+            V(semid, 0);//release nv?        
         } else {
             V(semid, 2); // Release MUTEXCPT   
-            printf("[Controleur] No fin de mission from tampon.\n");
-            //printf("[controleur] cpt=%d",buffer->cpt);
-        }
-        
-        
+            //printf("[Controleur] No fin de mission from tampon.\n");
+        }    
        //-------------------mise a jour la structure info camion 
         if (recoie==1) 
         {
            recoie = 0;
         
-        	if (mission_status==3) {
+            if (mission_status==3) {
             		tab[camion_id].carburant_actuel=CP;
             }
             else {
@@ -146,56 +128,58 @@ int mission_status;
             if (mission_status !=5) tab[camion_id].etatc=4;
             else {tab[camion_id].etatc=5;
             	cpt_camion--; 
-            	printf("\n******cpt_camion=%d*********\n",cpt_camion);// fin de mission
-            }
-        
-        
-        }
-            
-            
-
-        
+            	printf("\n[Controleur] ******cpt_camion=%d*********\n",cpt_camion);// fin de mission
+            }       
+        }   
     //-----------------------------programmer mission
         int i,count;
 
 	message.fa.mission=0;
-for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
-    if (tab[i].etatc == 4) {
-        printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
-
-        if (tab[i].carburant_actuel <= MIN) {
-            message.fa.camion_id = i;
-            message.fa.mission = 3; // refuel
-            tab[i].etatc = 3;
-        } else if (tab[i].carburant_actuel <= CP / 3 && tab[i].consomation_recente !=0 ) {//si le camion a fait une mission et carburanr actuel<=CP alors repos
-            message.fa.camion_id = i;
-            message.fa.mission = 2; // rest
-            tab[i].etatc = 2;
-        } else {
-            for (int j = 0; j < M; j++) {
-                if (etatp[j] == 2) {
-                	int sauv=j;
-                    
-                    for (int k = j + 1; k < M; k++) {
-                        if (etatp[k] == 2) {
-                        	etatp[sauv] = 3;//a la in apres trouve
-                            etatp[k] = 3;
-                            message.fa.camion_id =i;
-                            message.fa.mission = 1; // collect
-                            tab[i].etatc = 1;
-                            message.fa.idP1 = j;
-                            message.fa.idP2 = k;
-                            break;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
-        last_camion = i; // Update the last camion assigned
-        break;           // Exit after assigning one mission
-    }
+	for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
+    		if (tab[i].etatc == 4) 
+    		{
+        		//printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
+			if (tab[i].carburant_actuel <= MIN) 
+			{
+            			message.fa.camion_id = i;
+            			message.fa.mission = 3; // refuel
+            			tab[i].etatc = 3;
+        		} 
+        		else 
+        			if (tab[i].carburant_actuel <= CP / 3 && tab[i].consomation_recente !=0 ) 
+        			{//si le camion a fait une mission et carburant actuel<=CP alors repos
+            				message.fa.camion_id = i;
+            				message.fa.mission = 2; // rest
+            				tab[i].etatc = 2;
+        			}			 
+        			else 
+        			{
+            				for (int j = 0; j < M; j++) 
+            				{
+                				if (etatp[j] == 2) 
+                				{
+                					int sauv=j;
+              						for (int k = j + 1; k < M; k++) 
+              						{
+                        					if (etatp[k] == 2) 
+                        					{
+                        					etatp[sauv] = 3;//a la in apres trouve
+                            					etatp[k] = 3;
+                            					message.fa.camion_id =i;
+                            					message.fa.mission = 1; // collect
+                            					tab[i].etatc = 1;
+                            					message.fa.idP1 = j;
+                            					message.fa.idP2 = k;
+                            					break;
+                        					}
+                    					}
+                    					break;
+                				}
+            				}
+        			}
+				last_camion = i; // Update the last camion assigned
+        			break;           // Exit after assigning one mission
+    		}
 }
 
       //-----------------------------send mission (msg)
@@ -204,7 +188,7 @@ for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) 
       msgsnd(msgid, &message, sizeof(struct Faffect), 0);
       printf("[Controleur] envoyer une mission %d au camion %d\n",message.fa.mission , message.fa.camion_id);
       //printf("[Controleur] la dist idP1=%d idP2=%d\n",message.fa.idP1,message.fa.idP2);
-      }//else printf("\ncant send mission!\n");
+      }
       
     
 
@@ -217,6 +201,7 @@ for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) 
 /***************************************************CAMION*********************************************/
 void camion(int i,int semid, struct tampon *buffer,int msgid) {
 struct Message message;
+
 
     int mission_count = MAX;
     struct Tfmissions temp;
@@ -253,35 +238,23 @@ struct Message message;
         temp.camion_id =i;
         
 	//------------------------- camion va deposer
-	P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-	if ( (buffer->cpt) != R)
-	{
-	V(semid, 2); // Release MUTEXCPT	
 	P(semid, 0); // NV semaphore, si il y a place dans le tampon
 	
         P(semid, 1); // MUTEXP semaphore (exclusive access to shared buffer)
-	// Critical section: write into buffer
-	Deposer(buffer, i,temp); // Add mission to buffer
-        printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
-        // Release MUTEXP
-        V(semid, 1);
-        
-        // Update item count (cpt)
-        P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
-        buffer->cpt++;
-        //printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
-        V(semid, 2); // Release MUTEXCPT
-        //printf("[camion %d] cpt=%d\n",i,buffer->cpt);
-	}
 	
-	else 
-	{V(semid, 1); // Release MUTEXCPT	
-	}
-
+	Deposer(buffer, i,temp); // Add fin mission to buffer
+        printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
         
-	sleep(2);
+        	
+        
+        V(semid, 1);// Release MUTEXP
+        // Update item count (cpt)
+        	P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
+        	buffer->cpt++;
+        	//printf("[Camion %d] Incremented item count cpt=%d\n",i,buffer->cpt);
+        	V(semid, 2); // Release MUTEXCPT
        
-   
+	sleep(2);
     } while (mission_count != 0);
     printf("[camion %d] IS DONE!\n",i);
     exit(0);
@@ -289,6 +262,7 @@ struct Message message;
 
 /************************************************************REMPLIR**************************************************/
 void remplir_distance() {
+
     FILE *file_decharge = fopen("dist_decharge.txt", "r");
     FILE *file_poubelles = fopen("dist_poubelles.txt", "r");
 
@@ -324,58 +298,93 @@ void remplir_distance() {
     fclose(file_decharge);
     fclose(file_poubelles);
 }
+//-----------------------------------------------------------------------------------------------------
+void new_line()
+{
+for (int k=0; k<30;k++)
+	{
+	printf("----");
+	}
+}
+void affiche_parent()
+{
+new_line();
+printf("\n\tPROCESSUS PARENT:\n");
+new_line();
+	printf("\n");
+}
+//-----------------------------------------------------------------------------------------------------
+void affiche_fils()
+{
+new_line();
+printf("\n\tPROCESSUS CONTROLEUR ET PROCESSUS CAMIONS:\n");
+new_line();
+	printf("\n");
+}
+
+//-----------------------------------------------------------------------------------------------------
+void cree_STRUCTURE(int *shmid, int *semid, int *msgid, struct tampon **buffer) {
+    key_t key = CLE;
+	affiche_parent();	
+    // Delete existing message queue if it exists
+    if (file_existe(MSG_KEY) == 1) {
+        delete_message_queue(MSG_KEY);
+    }
+
+    // 1. Create shared memory
+    *shmid = cree_mem_partage(key, sizeof(struct tampon));
+
+    // 2. Attach shared memory
+    *buffer = attache_mem_partage(*shmid);
+
+    // 3. Create message queue
+    *msgid = init_message_queue(MSG_KEY);
+
+    // 4. Initialize semaphores
+    int initValues[] = {R, 1, 1}; // NV = R, MUTEXP = 1, MUTEXCPT = 1
+    *semid = sem_create(SEM_KEY, 3, initValues);
+    
+    // Print success message
+    printf("\n\tLES STRUCTURES CREE AVEC SUCCEE:\n");
+    printf("\t-----------------------------------\n");
+    printf("\tle id d esemble de semaphore: %d\n", *semid);
+    printf("\tle id de memoire partage est: %d\n", *shmid);
+    printf("\tle id de file de message: %d\n", *msgid);
+}
+//-----------------------------------------------------------------------------------------------------
+void Detruire_STRUCTURE(int msgid, struct tampon *buffer, int shmid, int semid)
+{
+	delete_message_queue(MSG_KEY) ;
+        detache_mem_partage(buffer);
+        detruire_mem_partage(shmid) ;
+        sem_delete(semid);
+}
 
 /************************************************************MAIN****************************************************/
 int main() {
    
      int shmid, semid;
-    key_t key = CLE;int msgid;
+    int msgid;
     struct tampon *buffer;
     
     //--------------------------------------cree les structures
-    delete_message_queue(MSG_KEY) ;//if it exists
-    // Create shared memory
-    shmid = cree_mem_partage(key, sizeof(struct tampon)) ;
-
-    // Attach shared memory
-    buffer = attache_mem_partage(shmid);
-
-    // Create a message queue
-    msgid =init_message_queue(MSG_KEY);
-
-
-    // Create semaphores
-    int initValues[] = {R, 1, 1}; // NV = R, MUTEXP = 1, MUTEXCPT = 1
-    semid = sem_create(SEM_KEY, 3, initValues);
-    printf("\n\tLES STRUCTURES CREE AVEC SUCCEE:\n");
-    printf("\t-----------------------------------\n");
-    printf("\tle id d esemble de semaphore: %d\n",semid);
-    printf("\tle id de memoire partage est: %d\n",shmid );
-    printf("\tle id de file de message: %d\n\n",msgid);
-    
-    
+    cree_STRUCTURE(&shmid, &semid, &msgid, &buffer);
     
     //--------------------------------------cree les camions et le contreuleur
-    // Simulate controller sending tasks and trucks processing them
+    affiche_fils();
     int pid;
-    
-    // Fork to create a new process for the controller
     pid = fork();
     
     if (pid == 0) {
-        // Child process: Controller behavior
         controller(semid, buffer, msgid);
         
     }
-        // Parent process: Trucks behavior
         for (int i = 0; i < N; i++) {
             int truck_pid = fork();
             
             if (truck_pid == 0) 
             {
-                // Child process: Truck behavior
-                camion(i,semid, buffer, msgid);
-                
+                camion(i,semid, buffer, msgid);               
             }
         }
             
@@ -383,12 +392,9 @@ int main() {
         for (int i = 0; i < N+1; i++) {
             wait(NULL);  // Wait for each truck process to finish
         }
+        affiche_parent();
+        Detruire_STRUCTURE(msgid, buffer, shmid, semid);
         
-        
-        delete_message_queue(MSG_KEY) ;
-        detache_mem_partage(buffer);
-        detruire_mem_partage(shmid) ;
-        sem_delete(semid);
         exit(1);
         
     return 0;

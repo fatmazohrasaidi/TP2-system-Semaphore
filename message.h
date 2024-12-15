@@ -21,7 +21,6 @@ int init_message_queue(key_t key) {
         exit(1);
     }
 
-    printf("Message queue created with ID: %d\n", msgid);
     return msgid;
 }
 
@@ -29,16 +28,28 @@ int init_message_queue(key_t key) {
 void delete_message_queue(key_t key) {
     int msgid = msgget(key, 0666);  // Check if the queue exists
 
-    if (msgid == -1) {
+    /*if (msgid == -1) {
         printf("No message queue to delete.\n");
-    } else {
+    } else {*/
         if (msgctl(msgid, IPC_RMID, NULL) == -1) {
             perror("Error deleting message queue");
         } else {
-            printf("Message queue deleted successfully.\n");
+            printf("\tFile de message detruit avec succes.\n");
         }
-    }
+    //}
 }
+// verifier si la file de message existe deja 
+int file_existe(key_t key)
+{
+	int msgid = msgget(key, 0666); 
+	if (msgid != -1) {printf("\n\tfile de message existe!\n");return 1;}//so it already exists
+	else return 0;
+}
+
+
+
+
+
 
 #endif // MESSAGE_H
 
