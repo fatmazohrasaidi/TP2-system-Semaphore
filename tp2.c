@@ -25,9 +25,6 @@
 #define MAX_DISTANCE 10 // Distance max entre les points
 
 /****************************		DECLARATION DES STRUCTURE	***************************************/
-int dist_poubelles[M][M];
-int dist_decharge[M];
-void remplir_distance();
 
 // Structure for Faffect message (Controller -> Truck)
 struct Faffect {
@@ -41,9 +38,43 @@ struct Message {
     long mtype;            // Message type (must be long)
     struct Faffect fa;     // Payload (Faffect structure)
 };
+/************************************************************REMPLIR**************************************************/
+void remplir_distance(int dist_decharge[M], int dist_poubelles[M][M]) {
+    FILE *file_decharge = fopen("dist_decharge.txt", "r");
+    FILE *file_poubelles = fopen("dist_poubelles.txt", "r");
 
+    if (!file_decharge || !file_poubelles) {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    // Fill dist_decharge array
+    for (int j = 0; j < M; j++) {
+        if (fscanf(file_decharge, "%d", &dist_decharge[j]) != 1) {
+            printf("Error: Not enough data in dist_decharge.txt.\n");
+            fclose(file_decharge);
+            fclose(file_poubelles);
+            exit(1);
+        }
+    }
+
+    // Fill dist_poubelles 2D array
+    for (int j = 0; j < M; j++) {
+        for (int i = 0; i < M; i++) {
+            if (fscanf(file_poubelles, "%d", &dist_poubelles[j][i]) != 1) {
+                printf("Error: Not enough data in dist_poubelles.txt.\n");
+                fclose(file_decharge);
+                fclose(file_poubelles);
+                exit(1);
+            }
+        }
+    }
+
+    fclose(file_decharge);
+    fclose(file_poubelles);
+}
 /**************************************************	DEPOSER	********************************************/
-void Deposer(struct tampon *buffer, int camion_id, struct Tfmissions temp) {
+void Deposer(struct tampon *buffer, struct Tfmissions temp) {
     int index = buffer->q % R; // Find next empty slot
     buffer->tabmission[index].camion_id = temp.camion_id;
     buffer->tabmission[index].mission_status = temp.mission_status; // Dummy value for mission status
@@ -97,7 +128,7 @@ int mission_status,t=0;
         if ( (buffer->cpt) != 0) 
         {
         		V(semid, 2); // MUTEXCPT
-            		Prelever(buffer, &camion_id, &mission_status, &consomation_recente,&t); // Take mission from buffer
+            		Prelever(buffer, &camion_id, &mission_status, &consomation_recente,&t); // Take fin mission from buffer
                 	printf("[Controleur] recoie fin de mission(camion_id=%d, mission_status=%d, consomation_recente=%d)\n", camion_id, mission_status, consomation_recente);
                 	recoie=1;
 	    		P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
@@ -109,21 +140,28 @@ int mission_status,t=0;
             V(semid, 2); // Release MUTEXCPT   
             //printf("[Controleur] No fin de mission from tampon.\n");
         }    
-       //-------------------mise a jour la structure info camion 
-        if (recoie==1) 
+       //----------------------mise a jour la structure info camion 
+       
+        if (recoie==1)//si le controleur recoie une mission, mise a jour la structure info camion  
         {
            recoie = 0;
-        
+        	/*etape 1: changer le carburant et la consomation recente */
             if (mission_status==3) {
             		tab[camion_id].carburant_actuel=CP;
+            		tab[camion_id].consomation_recente=0;
             }
-            else {
+            else 
+            {
             		tab[camion_id].consomation_recente=  consomation_recente;    
             		tab[camion_id].carburant_actuel -= tab[camion_id].consomation_recente;
+            		//printf("[controleur] pour le camion=%d consomation_recente=%d , carburant_actuel=%d\n",camion_id,tab[camion_id].consomation_recente, tab[camion_id].carburant_actuel  );
             }
             
+            /*etape 2: changer l'etat de camion*/
             if (mission_status !=5) tab[camion_id].etatc=4;
-            else {tab[camion_id].etatc=5;
+            else 
+            {
+               tab[camion_id].etatc=5;
             	cpt_camion--; 
             	printf("\n[Controleur] ******cpt_camion=%d*********\n",cpt_camion);// fin de mission
             }       
@@ -135,7 +173,7 @@ int mission_status,t=0;
 	for (i = (last_camion + 1) % N, count = 0; count < N; i = (i + 1) % N, count++) {
     		if (tab[i].etatc == 4) 
     		{
-        		//printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
+        		printf("[controleur] carburant actuel=%d de camion %d\n", tab[i].carburant_actuel, i);
 			if (tab[i].carburant_actuel <= MIN) 
 			{
             			message.fa.camion_id = i;
@@ -197,13 +235,14 @@ int mission_status,t=0;
 
 /***************************************************CAMION*********************************************/
 void camion(int i,int semid, struct tampon *buffer,int msgid) {
-struct Message message;
-
+	struct Message message;
+	int dist_poubelles[M][M];
+	int dist_decharge[M];
 
     int mission_count = MAX;
     struct Tfmissions temp;
     
-    remplir_distance();
+    remplir_distance(dist_decharge, dist_poubelles);
     do {
     //----------------------recevoir misssion
     msgrcv(msgid, &message, sizeof(struct Faffect), i + 1, 0);
@@ -213,6 +252,7 @@ struct Message message;
                 sleep(2);
                 temp.mission_status = 1;
                 temp.consomation_recente = C * (dist_decharge[message.fa.idP1] + dist_poubelles[message.fa.idP1][message.fa.idP2]);
+                printf("[Camion %d] doing mission %d ....\n",i,message.fa.mission);
                 printf("[Camion %d] dis dech=%d dist poub[%d][%d]=%d\n",i,dist_decharge[message.fa.idP1],message.fa.idP1,message.fa.idP2, dist_poubelles[message.fa.idP1][message.fa.idP2]  );
                 mission_count--;
                 if ( mission_count == 0 ) {temp.mission_status = 5;}
@@ -222,12 +262,14 @@ struct Message message;
 
             case 2:
                 sleep(3);
+                printf("[Camion %d] doing mission %d ....\n",i,message.fa.mission);
                 temp.mission_status = 2;
                 temp.consomation_recente =0;
                 break;
 
             case 3:
                 sleep(4);
+                printf("[Camion %d] doing mission %d ....\n",i,message.fa.mission);
                 temp.mission_status = 3;
 
                 break;
@@ -237,7 +279,7 @@ struct Message message;
 	//------------------------- camion va deposer
 	P(semid, 0); // NV semaphore, si il y a place dans le tampon	
         P(semid, 1); // MUTEXP semaphore (exclusive access to shared buffer)
-	Deposer(buffer, i,temp); // Add fin mission to buffer
+	Deposer(buffer,temp); // Add fin mission to buffer
         	printf("[Camion %d] Added fin mission to tampon(camion_id=%d)\n", i, i);
         V(semid, 1);// Release MUTEXP
         P(semid, 2); // MUTEXCPT semaphore (exclusive access to cpt)
@@ -250,44 +292,8 @@ struct Message message;
     exit(0);
 }
 
-/************************************************************REMPLIR**************************************************/
-void remplir_distance() {
 
-    FILE *file_decharge = fopen("dist_decharge.txt", "r");
-    FILE *file_poubelles = fopen("dist_poubelles.txt", "r");
 
-    if (!file_decharge || !file_poubelles) {
-        perror("Error opening file");
-        exit(1);
-    }
-
-    for (int j = 0; j < M; j++) {
-        if (fscanf(file_decharge, "%d", &dist_decharge[j]) != 1) {
-            printf("Error: Not enough data in decharge.txt.\n");
-            fclose(file_decharge);
-            fclose(file_poubelles);
-            exit(1);
-        }
-    }
-    int i,j;
-    //lock_file(file_poubelles); // Lock before reading
-    for (j = 0; j < M; j++) {
-        for (i = 0; i < M; i++) {
-            if (fscanf(file_poubelles, "%d", &dist_poubelles[j][i]) != 1) {
-                printf("Error: Not enough data in poubelles.txt.\n");
-                fclose(file_decharge);
-                fclose(file_poubelles);
-                exit(1);
-            }
-        }
-    }
-    
-    //unlock_file(file_poubelles); // Unlock after reading
-   
-
-    fclose(file_decharge);
-    fclose(file_poubelles);
-}
 //-----------------------------------------------------------------------------------------------------
 void new_line()
 {
